@@ -2,3 +2,6 @@ numpy
 scipy
 matplotlib
 ratinabox
+pandas 
+dill
+tomplotlib
