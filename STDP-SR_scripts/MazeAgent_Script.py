@@ -1603,7 +1603,7 @@ class Visualiser():
 
 
     
-    def plotMAveraged(self,time=None, x_ticks=None, plot_no_theta=True, color='C1',ylim=None, renorm=True):
+    def plotMAveraged(self,time=None, x_ticks=None, plot_no_theta=True, color='C1',ylim=None, renorm=True, return_data=False):
         # only works/defined for open loop maze
         if time is not None: 
             hist_id = self.snapshots['t'].sub(time*60).abs().to_numpy().argmin()
@@ -1698,8 +1698,23 @@ class Visualiser():
         ax[1].spines['top'].set_color('none')
 
         ax[0].legend(frameon=False)    
-        ax[1].legend(frameon=False)    
-        return fig, ax
+        ax[1].legend(frameon=False)  
+
+        data_dict = {'x': x.copy(), 
+                     'M_av': M_av.copy(), 
+                     'M_std': M_std.copy(), 
+                     'W_av': W_av.copy(), 
+                     'W_std': W_std.copy(), 
+                     'W_notheta_av': W_notheta_av.copy(), 
+                     'W_notheta_std': W_notheta_std.copy()
+        } 
+     
+        if return_data:
+            print("returning data dict")
+            return data_dict
+        
+        else: 
+            return fig, ax
 
     def plotMetrics(self,total_time=None, x_ticks=None):
         t         = []
