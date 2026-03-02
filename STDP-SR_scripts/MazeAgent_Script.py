@@ -546,23 +546,24 @@ class MazeAgent():
             else: 
                 mapMatrix = self.online_mapping
 
-            postFiringRate_ = np.maximum(0,np.matmul(mapMatrix,preFiringRate_))
-            firingRate_ = np.concatenate((preFiringRate_,postFiringRate_))
-            layerLabel_ = np.array(['pre']*len(preFiringRate_) + ['post']*len(postFiringRate_))
-            neuronIDs = np.concatenate((np.arange(len(preFiringRate_)), np.arange(len(postFiringRate_))))
-            n_spike_list = np.random.poisson(firingRate_*dt)
-            
+            postFiringRate_ = np.maximum(0,np.matmul(mapMatrix,preFiringRate_)) # multiply pre activity by synaptic weight matrix -> input to post neurons. Also ensure all firing rates are above 0
+            firingRate_ = np.concatenate((preFiringRate_,postFiringRate_)) # concatenate pre and post firing rates in one long vector -> length = 2xnCells
+            layerLabel_ = np.array(['pre']*len(preFiringRate_) + ['post']*len(postFiringRate_)) # label which neuron belongs to which layer -> labeled 'pre' or 'post'
+            neuronIDs = np.concatenate((np.arange(len(preFiringRate_)), np.arange(len(postFiringRate_)))) # create neuron ID -> e.g neuron 10 in pre layer and neuron 10 in post layer (they are different neurons distinguished by pre/post label)
+            n_spike_list = np.random.poisson(firingRate_*dt) # get the firing rate from random poisson distribution
+            # n_spike_list[i] would be the number of spikes of neuron i in the timestep
+
             spikingNeurons = (n_spike_list != 0) #in short time dt cells can spike 0 or 1 time only (good enough approximation) 
-            spikeCount += sum(spikingNeurons)
+            spikeCount += sum(spikingNeurons) # counts how many neurons spiked in dt and gives sum
             spikeTimes = np.random.uniform(self.t,self.t+dt,len(neuronIDs))[spikingNeurons]
-            spikeIDs = neuronIDs[spikingNeurons]
-            spikeLayerLabels = layerLabel_[spikingNeurons]
-            spikeList = np.vstack((spikeIDs,spikeTimes,spikeLayerLabels)).T
-            spikeList = spikeList[np.argsort(spikeList[:,1])]   
+            spikeIDs = neuronIDs[spikingNeurons] # get ID of the neurons that spiked
+            spikeLayerLabels = layerLabel_[spikingNeurons] # get the layer they belonged to
+            spikeList = np.vstack((spikeIDs,spikeTimes,spikeLayerLabels)).T # put them all in a matrix/list together
+            spikeList = spikeList[np.argsort(spikeList[:,1])] # sort them according to spike time   
 
             for spikeInfo in spikeList:
-                cell, time, layer = int(spikeInfo[0]), float(spikeInfo[1]), spikeInfo[2]
-                timeDiff = time - lastSpikeTime 
+                cell, time, layer = int(spikeInfo[0]), float(spikeInfo[1]), spikeInfo[2] #for each column cell = cell ID as integer, time= spike time as float, layer= string I guess
+                timeDiff = time - lastSpikeTime # difference between current time and the last processed spike event of any neuron (not that specific neuron!)
 
                 preTrace        *= np.exp(- timeDiff / self.tau_STDP_plus) #traces for all cells decay...
                 postTrace       *= np.exp(- timeDiff / self.tau_STDP_minus) #traces for all cells decay...
@@ -575,8 +576,8 @@ class MazeAgent():
 
                 lastSpikeTime += timeDiff
 
-            if i == 1: 
-                thetaFiringRate = firingRate_
+            if i == 1: # if theta condition (1=theta; 0=notheta, from line 538)
+                thetaFiringRate = firingRate_ #store theta firing rate to return later
         
         if self.rownorm == True: 
             # self.W = self.W / np.linalg.norm(self.W,axis=1)[:,np.newaxis]
@@ -589,10 +590,10 @@ class MazeAgent():
             self.W_notheta = self.W_notheta / sumWnt[:,np.newaxis]
         
         #save spike data
-        CA3spiketimes = spikeTimes[spikeLayerLabels=='pre']
-        CA3spikeids = spikeIDs[spikeLayerLabels=='pre']
-        CA1spiketimes = spikeTimes[spikeLayerLabels=='post']
-        CA1spikeids = spikeIDs[spikeLayerLabels=='post']
+        CA3spiketimes = spikeTimes[spikeLayerLabels=='pre'] # spike time of all CA3 layer neurons
+        CA3spikeids = spikeIDs[spikeLayerLabels=='pre'] # spike IDs of CA3 cells
+        CA1spiketimes = spikeTimes[spikeLayerLabels=='post'] # spike times of CA1 layer cells
+        CA1spikeids = spikeIDs[spikeLayerLabels=='post'] # spike IDs of CA1 layer cells
         self.spikedata['CA3']['times'].extend(CA3spiketimes)
         self.spikedata['CA3']['ids'].extend(CA3spikeids)
         self.spikedata['CA1']['times'].extend(CA1spiketimes)
