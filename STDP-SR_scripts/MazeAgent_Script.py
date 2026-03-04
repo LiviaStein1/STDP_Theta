@@ -143,7 +143,8 @@ class MazeAgent():
         self.t = 0
         self.runID = 0  
         self.thetaPhase = self.thetaFreq*(self.t%(1/self.thetaFreq))*2*np.pi
-
+        # initialise scrambled theta phase (Livi addition)
+        self.thetaPhase_scrambled = np.random.uniform(0,2*np.pi, size = self.nCells) # give scrambled condition random theta phase (Livi addition)
 
         #make maze 
         print("   making the maze walls")
@@ -244,6 +245,7 @@ class MazeAgent():
             self.W = self.M.copy() / self.nCells
             self.M_theta = self.M.copy()
             self.W_notheta = self.W.copy()
+            self.W_scrambled = self.W.copy() #Livi scramble (i.e. remove if stupid)
 
 
 
@@ -280,8 +282,8 @@ class MazeAgent():
         self.discreteStates = self.positionArray_to_stateArray(self.discreteCoords,stateType=self.stateType,verbose=True) #an array of discretised position coords over entire map extent 
         self.statesAlreadyInitialised = True
 
-        #store time zero snapshot
-        snapshot = pd.DataFrame({'t':[self.t], 'M': [self.M.copy()], 'W': [self.W.copy()],'W_notheta': [self.W_notheta.copy()], 'mazeState':[self.mazeState]})
+        #store time zero snapshot # Livi: added W_scrambled
+        snapshot = pd.DataFrame({'t':[self.t], 'M': [self.M.copy()], 'W': [self.W.copy()],'W_notheta': [self.W_notheta.copy()], 'W_scrambled' : [self.W_scrambled.copy()], 'mazeState':[self.mazeState]})
         self.snapshots = pd.concat([self.snapshots, snapshot], ignore_index=True)
 
         #STDP stuff
@@ -294,6 +296,12 @@ class MazeAgent():
         self.lastSpikeTime_notheta = np.array(-10.0)
         self.spikeCount = np.array(0)
         self.spikeCount_notheta = np.array(0)
+        # Livi: add scrambled condition
+        print("Adding 'theta scrambled' Condition")
+        self.preTrace_scrambled = np.zeros(self.nCells) #for potentiation
+        self.postTrace_scrambled = np.zeros(self.nCells) # for depression
+        self.lastSpikeTime_scrambled = np.array(-10.0) # initialise time since last spike of any neuron (large bcs first)
+        self.spikeCount_scrambled = np.array(0) # keep track of spike count (initialised as zero logically) 
 
     def runRat(self,
             trainTime=10,
@@ -366,7 +374,7 @@ class MazeAgent():
 
                 #save snapshot 
                 if (isinstance(saveEvery, numbers.Number)) and (i % int(saveEvery * 60 / self.dt) == 0):
-                    snapshot = pd.DataFrame({'t':[self.t], 'M': [self.M.copy()], 'W': [self.W.copy()], 'W_notheta':[self.W_notheta.copy()], 'mazeState':[self.mazeState]})
+                    snapshot = pd.DataFrame({'t':[self.t], 'M': [self.M.copy()], 'W': [self.W.copy()], 'W_notheta':[self.W_notheta.copy()], 'W_scrambled':[self.W_scrambled.copy()], 'mazeState':[self.mazeState]}) #Livi: added scrambled
                     self.snapshots = pd.concat([self.snapshots, snapshot], ignore_index=True)
 
             except KeyboardInterrupt: 
@@ -381,7 +389,7 @@ class MazeAgent():
         self.runID += 1
         runHistory = pd.DataFrame({'t':list(hist_t[:i]), 'pos':list(hist_pos[:i]),'delta':list(hist_delta[:i])})
         self.history = pd.concat([self.history, runHistory], ignore_index=True)
-        snapshot = pd.DataFrame({'t': [self.t], 'M': [self.M.copy()], 'W': [self.W.copy()], 'W_notheta':[self.W_notheta.copy()], 'mazeState':[self.mazeState]})
+        snapshot = pd.DataFrame({'t': [self.t], 'M': [self.M.copy()], 'W': [self.W.copy()], 'W_notheta':[self.W_notheta.copy()], 'W_scrambled':[self.W_scrambled.copy()], 'mazeState':[self.mazeState]}) # Livi: added scrambled
         self.snapshots = pd.concat([self.snapshots, snapshot], ignore_index=True)
 
         #find and save grid/place cells so you don't have to repeatedly calculate them when plotting 
@@ -471,7 +479,14 @@ class MazeAgent():
                 self.preTrace,          
                 self.postTrace,          
                 self.lastSpikeTime, 
-                self.spikeCount), 
+                self.spikeCount),
+                
+                (self.thetaModulation_scrambled(state),
+                 self.W_scrambled,
+                 self.preTrace_scrambled,
+                 self.postTrace_scrambled,
+                 self.lastSpikeTime_scrambled,
+                 self.spikeCount_scrambled), 
                 )
 
         
@@ -504,6 +519,8 @@ class MazeAgent():
 
             if i == 1: 
                 thetaFiringRate = firingRate_
+            if i == 2:
+                scrambledThetaFiringRate = firingRate_
 
         return thetaFiringRate
 
@@ -532,7 +549,15 @@ class MazeAgent():
                 self.postTrace,          
                 self.lastSpikeTime, 
                 self.spikeCount), 
+                
+                (self.thetaModulation_scrambled(state),
+                 self.W_scrambled,
+                 self.preTrace_scrambled,
+                 self.postTrace_scrambled,
+                 self.lastSpikeTime_scrambled,
+                 self.spikeCount_scrambled),
                 )
+
 
         
         for i, (firingRate, W, preTrace, postTrace, lastSpikeTime, spikeCount) in enumerate(data): 
@@ -578,6 +603,8 @@ class MazeAgent():
 
             if i == 1: # if theta condition (1=theta; 0=notheta, from line 538)
                 thetaFiringRate = firingRate_ #store theta firing rate to return later
+            if i == 2: # if scrambled theta condition (2=scrambled, from line 538)
+                scrambledThetaFiringRate = firingRate_ # store scrambled theta firing rate in case it is needed at any point in the future (Livi addition)
         
         if self.rownorm == True: 
             # self.W = self.W / np.linalg.norm(self.W,axis=1)[:,np.newaxis]
@@ -585,9 +612,13 @@ class MazeAgent():
             sumW = np.sum(self.W,axis=1)
             sumW[sumW<1]=1
             self.W = self.W / sumW[:,np.newaxis]
-            sumWnt = np.sum(self.W,axis=1)
+            sumWnt = np.sum(self.W_notheta,axis=1)
             sumWnt[sumWnt<1]=1
             self.W_notheta = self.W_notheta / sumWnt[:,np.newaxis]
+            # add part about scrambled theta condition (Livi addition)
+            sumWscrambled = np.sum(self.W_scrambled,axis=1)
+            sumWscrambled[sumWscrambled<1]=1
+            self.W_scrambled = self.W_scrambled / sumWscrambled[:,np.newaxis]
         
         #save spike data
         CA3spiketimes = spikeTimes[spikeLayerLabels=='pre'] # spike time of all CA3 layer neurons
@@ -620,6 +651,35 @@ class MazeAgent():
         preferedThetaPhase = np.pi + sigmasToCellMidline * self.precessFraction * np.pi
 
         phaseDiff = preferedThetaPhase - self.thetaPhase
+        modulatedFiringRate = firingRate * vonmises.pdf(phaseDiff,kappa=self.kappa) * 2*np.pi
+
+        return modulatedFiringRate
+    
+    # Add a new function that implements scrambled theta modulation (Livi addition)
+    def thetaModulation_scrambled(self, firingRate, position=None, direction=None):
+        """
+        Takes a firing rate vector and modulates it to account for scrambled theta phase precession, 
+        i.e. each cell has a random preferred theta phase that does not depend on position.
+        Args:
+            firingRate (np.array): The raw (position dependent) firing rate vector to be modulated
+            position (np.array(2,), optional): The agent position. Defaults to None.
+            direction (np.array(2,), optional): The agent direction. Defaults to None.
+            """
+        if position is None:
+            position = self.pos
+        if direction is None:
+            direction = self.dir
+        
+        phase_inc = 2*np.pi * self.thetaFreq * self.dt
+        phase_noise = np.random.normal(0, np.pi/3, size=self.nCells) # add some noise to the scrambled phase to make it less extreme
+        self.thetaPhase_scrambled = (self.thetaPhase_scrambled + phase_inc + phase_noise) % (2*np.pi) # update scrambled theta phase with some noise
+
+        ## same as for normal theta modulation, just with scrambled theta phase instead of position-dependent preferred phase
+        vectorToCells = self.vectorsToCellCentres(position)
+        sigmasToCellMidline = (np.dot(vectorToCells,direction) / np.linalg.norm(direction))  / self.sigmas #as mutiple of sigma
+        preferedThetaPhase = np.pi + sigmasToCellMidline * self.precessFraction * np.pi
+
+        phaseDiff = preferedThetaPhase - self.thetaPhase_scrambled
         modulatedFiringRate = firingRate * vonmises.pdf(phaseDiff,kappa=self.kappa) * 2*np.pi
 
         return modulatedFiringRate
@@ -1053,16 +1113,19 @@ class MazeAgent():
         W = rowAlignMatrix(snapshot['W'].copy())
         W_notheta = rowAlignMatrix(snapshot['W_notheta'].copy())
         M = rowAlignMatrix(self.snapshots.iloc[-1]['M'].copy())
+        W_scrambled = rowAlignMatrix(snapshot['W_scrambled'].copy()) # Livi addition
 
         mid = int(self.nCells / 2)
 
         #R2s
         R_W = Rsquared(W,M)              
         R_Wnotheta = Rsquared(W_notheta,M)  
+        R_Wscrambled = Rsquared(W_scrambled,M) # Livi addition
 
         #SNRs
         SNR_W = (np.max(np.mean(W,axis=0)) - np.min(np.mean(W,axis=0))) / np.mean(np.std(W,axis=0)[mid-5:mid+5])
         SNR_Wnotheta = (np.max(np.mean(W_notheta,axis=0)) - np.min(np.mean(W_notheta,axis=0))) / np.mean(np.std(W_notheta,axis=0)[mid-5:mid+5])
+        SNR_Wscrambled = (np.max(np.mean(W_scrambled,axis=0)) - np.min(np.mean(W_scrambled,axis=0))) / np.mean(np.std(W_scrambled,axis=0)[mid-5:mid+5])
 
         #skews
         W_flat = np.mean(W,axis=0)/np.trapezoid(np.mean(W,axis=0),x)
@@ -1071,18 +1134,26 @@ class MazeAgent():
         Wnotheta_flat /= np.max(Wnotheta_flat)
         M_flat = np.mean(M,axis=0)/np.trapezoid(np.mean(M,axis=0),x)
         M_flat /= np.max(M_flat)
+        # add scramble(Livi addition)
+        W_scrambled_flat = np.mean(W_scrambled,axis=0)/np.trapezoid(np.mean(W_scrambled,axis=0),x)
+        W_scrambled_flat /= np.max(W_scrambled_flat)    
+
         try: skew_W = getSkewness(W_flat)
         except RuntimeError: skew_W = np.NaN
         try: skew_Wnotheta = getSkewness(Wnotheta_flat)
         except RuntimeError: skew_Wnotheta = np.NaN
         try: skew_M = getSkewness(M_flat)
         except RuntimeError: skew_M = np.NaN
+        # add scramble(Livi addition)
+        try: skew_Wscrambled = getSkewness(W_scrambled_flat)
+        except RuntimeError: skew_Wscrambled = np.NaN
 
         #peaks 
         peak_W = x[np.argmax(W_flat)] - 2.5
         peak_Wnotheta = x[np.argmax(Wnotheta_flat)] - 2.5
         peak_M = x[np.argmax(M_flat)] - 2.5
-        return R_W, R_Wnotheta, SNR_W, SNR_Wnotheta, float(skew_W), float(skew_Wnotheta), float(skew_M), peak_W, peak_Wnotheta, peak_M
+        peak_Wscrambled = x[np.argmax(W_scrambled_flat)] - 2.5 # Livi addition
+        return R_W, R_Wnotheta, R_Wscrambled, SNR_W, SNR_Wnotheta, SNR_Wscrambled, float(skew_W), float(skew_Wnotheta), float(skew_M), float(skew_Wscrambled), peak_W, peak_Wnotheta, peak_M, peak_Wscrambled
 
     def saveToFile(self,name,directory="../savedObjects/"):
         np.savez(directory+name+".npz",self.__dict__)
@@ -1345,7 +1416,10 @@ class Visualiser():
             if whichM == 'M': M = snapshot['M'].copy()
             elif whichM == 'W': M = snapshot['W'].copy()
             elif whichM == 'M_theta': M = self.mazeAgent.M_theta.copy()
-            elif whichM == 'W_notheta': M = self.mazeAgent.W_notheta.copy()
+            # elif whichM == 'W_notheta': M = self.mazeAgent.W_notheta.copy() by Livi to be consistent with plotPlaceField()
+            elif whichM == 'W_notheta': M = snapshot['W_notheta'].copy() # by Livi to be consistent with plotPlaceField()
+            # elif whichM == 'W_scrambled': M = self.mazeAgent.W_scrambled.copy() # added/#ed by Livi
+            elif whichM == 'W_scrambled': M = snapshot['W_scrambled'].copy() # added/#ed by Livi
 
         t = int(np.round(snapshot['t']))
         most_positive = np.max(M)
@@ -1399,7 +1473,7 @@ class Visualiser():
         t = self.mazeAgent.saveHist[i]['t']
         ax.text(x=0, y=0, t="%.2f" %t)
 
-    def plotPlaceField(self, M=None, hist_id=-1, time=None, fig=None, ax=None, number=None, show=True, animationCall=False, plotTimeStamp=False,save=True,STDP=False,threshold=None,fitEllipse_=False,no_theta=False):
+    def plotPlaceField(self, M=None, hist_id=-1, time=None, fig=None, ax=None, number=None, show=True, animationCall=False, plotTimeStamp=False,save=True,STDP=False,threshold=None,fitEllipse_=False,no_theta=False, scrambled = False):
         if M is None: 
             #time in minutes
             if time is not None: 
@@ -1418,8 +1492,11 @@ class Visualiser():
             M = snapshot['M']
             if STDP==True: 
                 if no_theta == True:
-                    snapshot = self.snapshots.iloc[hist_id-22]
+                    #snapshot = self.snapshots.iloc[hist_id-22] by Livi to take same snapshot for all conditions
                     M = snapshot['W_notheta']
+                elif scrambled == True:
+                    #snapshot = self.snapshots.iloc[hist_id-22] by Livi
+                    M = snapshot['W_scrambled']
                 else:
                     M = snapshot['W']
             t = int(np.round(snapshot['t'] / 60))
@@ -1615,18 +1692,21 @@ class Visualiser():
         M = snapshot['M'].copy()
         W = snapshot['W'].copy() 
         W_notheta = snapshot['W_notheta'].copy()
+        W_scrambled = snapshot['W_scrambled'].copy() # added by Livi
         roll = int(self.mazeAgent.nCells/2)
-        M_copy, W_copy, W_notheta_copy = M.copy(), W.copy(), W_notheta.copy()
+        M_copy, W_copy, W_notheta_copy, W_scrambled_copy = M.copy(), W.copy(), W_notheta.copy(), W_scrambled.copy()
         for i in range(self.mazeAgent.nCells):
             M_copy[i,:] = np.roll(M[i,:],-i+roll)
             W_copy[i,:] = np.roll(W[i,:],-i+roll)
             W_notheta_copy[i,:] = np.roll(W_notheta[i,:],-i+roll)
+            W_scrambled_copy[i,:] = np.roll(W_scrambled[i,:],-i+roll)
 
         M_av,M_std = np.mean(M_copy,axis=0),np.std(M_copy,axis=0)
         W_av,W_std = np.mean(W_copy,axis=0),np.std(W_copy,axis=0)
         W_notheta_av,W_notheta_std = np.mean(W_notheta_copy,axis=0),np.std(W_notheta_copy,axis=0)
+        W_scrambled_av,W_scrambled_std = np.mean(W_scrambled_copy,axis=0),np.std(W_scrambled_copy,axis=0)
 
-        # print(f"skew W: {getSkewness(W_av)} vs skew W_notheta: {getSkewness(W_notheta_av)} vs skew M: {getSkewness(M_av)}")
+        print(f"skew W: {getSkewness(W_av)} vs skew W_notheta: {getSkewness(W_notheta_av)} vs skew M: {getSkewness(M_av)} vs skew W_scrambled: {getSkewness(W_scrambled_av)}")
         # print(f"mass ratio = {np.sum(W_av[:int(len(W_av/2))])/np.sum(W_av[int(len(W_av/2)):])} vs {np.sum(W_notheta_av[:int(len(W_notheta_av/2))])/np.sum(W_notheta_av[int(len(W_notheta_av/2)):])} (no theta)")
         print(f"mass ratio = {np.sum(W_av[:25])/np.sum(W_av[25:])} vs {np.sum(W_notheta_av[:25])/np.sum(W_notheta_av[25:])} (no theta)")
 
@@ -1635,6 +1715,7 @@ class Visualiser():
             M_av,M_std = M_av/(np.max(M_av)), M_std/(np.max(M_av))
             W_av,W_std = W_av/W_norm, W_std/W_norm
             W_notheta_av,W_notheta_std = W_notheta_av/W_norm, W_notheta_std/W_norm
+            W_scrambled_av,W_scrambled_std = W_scrambled_av/W_norm, W_scrambled_std/W_norm
         x = self.mazeAgent.centres[:,0]
         x = x-x[roll]
 
@@ -1650,6 +1731,7 @@ class Visualiser():
 
         Rs_wav = Rsquared(W,M)
         Rsq_wnothetaav = Rsquared(W_notheta,M)
+        Rsq_wscrambledav = Rsquared(W_scrambled,M)
 
         ax[1].plot(x,M_av,c='C0',linewidth=2, label = r" ")
         ax[0].plot(x,W_av,c=color,label=r" ",linewidth=2)
@@ -1660,6 +1742,9 @@ class Visualiser():
         if plot_no_theta == True: 
             ax[0].fill_between(x,W_notheta_av+W_notheta_std,W_notheta_av-W_notheta_std,facecolor=color,alpha=0.2)
             ax[0].plot(x,W_notheta_av,c=color,label=r" ",linewidth=1.5,alpha=0.7,linestyle='--', dashes=(1, 1))
+        if self.mazeAgent.W_scrambled is not None: # added by Livi
+            ax[0].fill_between(x,W_scrambled_av+W_scrambled_std,W_scrambled_av-W_scrambled_std,facecolor='C3',alpha=0.2)
+            ax[0].plot(x,W_scrambled_av,c='C3',label=r" ",linewidth=1.5,alpha=0.7)
 
         ax[0].set_yticks([])
         ax[1].set_yticks([])
@@ -1707,7 +1792,10 @@ class Visualiser():
                      'W_av': W_av.copy(), 
                      'W_std': W_std.copy(), 
                      'W_notheta_av': W_notheta_av.copy(), 
-                     'W_notheta_std': W_notheta_std.copy()
+                     'W_notheta_std': W_notheta_std.copy(),
+                     'W_scrambled_av': W_scrambled_av.copy(), 
+                     'W_scrambled_std': W_scrambled_std.copy()
+                     
         } 
      
         if return_data:
@@ -1717,14 +1805,16 @@ class Visualiser():
         else: 
             return fig, ax
 
-    def plotMetrics(self,total_time=None, x_ticks=None):
+    def plotMetrics(self,total_time=None, x_ticks=None): # Livi note: not adjusted for scrambled theta
         t         = []
 
         W_snr         = [] 
         W_notheta_snr = []
+        W_scrambled_snr = []
 
         W_r2 = []
         W_notheta_r2  = []
+        W_scrambled_r2  = []
 
         x = self.mazeAgent.centres[:,0]
 
@@ -1735,15 +1825,16 @@ class Visualiser():
             time = snapshot['t']
             if time >= 31:
                 
-                R2_W, R2_Wnotheta, SNR_W, SNR_Wnotheta, skew_W, skew_Wnotheta, skew_M, peak_W, peak_Wnotheta, peak_M = self.mazeAgent.getMetrics(time=time)
+                R2_W, R2_Wnotheta, R2_Wscrambled, SNR_W, SNR_Wnotheta, SNR_Wscrambled, skew_W, skew_Wnotheta, skew_M, skew_Wscrambled, peak_W, peak_Wnotheta, peak_M, peak_Wscrambled = self.mazeAgent.getMetrics(time=time)
         
                 t.append(time/60)
 
                 W_snr.append(SNR_W)
                 W_notheta_snr.append(SNR_Wnotheta)
-            
+                W_scrambled_snr.append(SNR_Wscrambled)
                 W_r2.append(R2_W)
                 W_notheta_r2.append(R2_Wnotheta)
+                W_scrambled_r2.append(R2_Wscrambled)
 
         
         snapshot = self.mazeAgent.snapshots.iloc[-1]
@@ -1751,11 +1842,12 @@ class Visualiser():
 
         fig, ax = plt.subplots(2,1,figsize=(1,2),sharex=True)
 
-        W_r2, W_notheta_r2 = np.array(W_r2), np.array(W_notheta_r2)
+        W_r2, W_notheta_r2, W_scrambled_r2 = np.array(W_r2), np.array(W_notheta_r2), np.array(W_scrambled_r2) # added scrambled by Livi
         thresh = 0.5 
         t_50 = t[np.argmin(np.abs(W_r2 - thresh))] 
         t_50_notheta = t[np.argmin(np.abs(W_notheta_r2 - thresh))] 
-        print(f"t0.5 {t_50:.3f} vs t0.5notheta {t_50_notheta:.3f}")
+        t_50_scrambled = t[np.argmin(np.abs(W_scrambled_r2 - thresh))] #added by Livi
+        print(f"t0.5 {t_50:.3f} vs t0.5notheta {t_50_notheta:.3f} vs t0.5scrambled {t_50_scrambled:.3f} (no theta vs scrambled)") # added scrambled by Livi
 
         end = -1
         if total_time is not None: 
@@ -1763,10 +1855,11 @@ class Visualiser():
             end = t_last
         ax[1].plot(t[:end],W_snr[:end],c='C1',linewidth=2, label=r"$\theta$")
         ax[1].plot(t[:end],W_notheta_snr[:end],c='C1',linewidth=1.5,linestyle='--', dashes=(1, 1),alpha=0.7,label=r"No $\theta$")
+        ax[1].plot(t[:end],W_scrambled_snr[:end],c='C2',linewidth=1.5,linestyle='-.', dashes=(1, 1),alpha=0.7,label=r"Scrambled $\theta$") #added by Livi
 
         ax[0].plot(t[:end],W_r2[:end],c='C1',linewidth=2)
         ax[0].plot(t[:end],W_notheta_r2[:end],c='C1',linewidth=1.5,linestyle='--', dashes=(1, 1),alpha=0.7)
-
+        ax[0].plot(t[:end],W_scrambled_r2[:end],c='C2',linewidth=1.5,linestyle='-.', dashes=(1, 1),alpha=0.7) #added by Livi
 
 
 
@@ -1801,7 +1894,7 @@ class Visualiser():
         return fig, ax 
 
 
-    def plotFieldSilhouette(self, N=25, plot_pf=True, plot_pf_notheta=False, plot_pf_M=True, plot_rf=False,no_theta=False):
+    def plotFieldSilhouette(self, N=25, plot_pf=True, plot_pf_notheta=False, plot_pf_M=True, plot_rf=False, plot_pf_scrambled=False, no_theta=False): # Livi note: not adjusted for scrambled theta
         hist_id = self.snapshots['t'].sub(30*60).abs().to_numpy().argmin()
         snapshot = self.snapshots.iloc[hist_id-22]
 
@@ -1809,8 +1902,9 @@ class Visualiser():
         rf = self.mazeAgent.discreteStates[10,:,N]
         pf = self.mazeAgent.getPlaceFields(M=self.mazeAgent.W, threshold=0)[N][10,:]
         pf_notheta = self.mazeAgent.getPlaceFields(M=snapshot['W_notheta'], threshold=0)[N][10,:]
+        pf_scrambled = self.mazeAgent.getPlaceFields(M=snapshot['W_scrambled'], threshold=0)[N][10,:] # added by Livi   
         pf_M = self.mazeAgent.getPlaceFields(M=self.mazeAgent.M, threshold=0)[N][10,:]
-        rf, pf, pf_notheta, pf_M = rf/np.trapezoid(rf,x), pf/np.trapezoid(pf,x), pf_notheta/np.trapezoid(pf_notheta,x), pf_M/np.trapezoid(pf_M,x)
+        rf, pf, pf_notheta, pf_scrambled, pf_M = rf/np.trapezoid(rf,x), pf/np.trapezoid(pf,x), pf_notheta/np.trapezoid(pf_notheta,x), pf_scrambled/np.trapezoid(pf_scrambled,x), pf_M/np.trapezoid(pf_M,x) #added scrambled here by Livi
 
         fig, ax = plt.subplots(figsize=(2,0.5))
         ax.set_xlim(0,5)
@@ -1821,13 +1915,23 @@ class Visualiser():
         if plot_pf == True:
             ax.fill_between(x[pf>=0],pf[pf>=0],0,facecolor="C1",alpha=0.5)
         if plot_pf_notheta == True:
-            ax.fill_between(x[pf_notheta>=0],pf_notheta[pf_notheta>=0],0,facecolor="C1",alpha=0.5)
-        
+            ax.fill_between(x[pf_notheta>=0],pf_notheta[pf_notheta>=0],0,facecolor="C3",alpha=0.5)
+        if plot_pf_scrambled == True:
+            ax.fill_between(x[pf_scrambled>=0],pf_scrambled[pf_scrambled>=0],0,facecolor="C5",alpha=0.5) #added by Livi
+
         pf = self.mazeAgent.getPlaceFields(M=self.mazeAgent.W, threshold=0)[N]
         pf_notheta = self.mazeAgent.getPlaceFields(M=snapshot['W_notheta'], threshold=0)[N]
         pf_M = self.mazeAgent.getPlaceFields(M=self.mazeAgent.M, threshold=0)[N]
-        print("R2: M-->W=",Rsquared(pf,pf_M),"M-->Wnotheta=",Rsquared(pf_notheta,pf_M))
-        tpl.xyAxes(ax)
+        pf_scrambled = self.mazeAgent.getPlaceFields(M=snapshot['W_scrambled'], threshold=0)[N] #added by Livi
+        print("R2: M-->W=",Rsquared(pf,pf_M),"M-->Wnotheta=",Rsquared(pf_notheta,pf_M),"M-->Wscrambled=",Rsquared(pf_scrambled,pf_M)) # added scrambled by Livi
+        
+        if hasattr(tpl, 'xyAxes'): 
+            tpl.xyAxes(ax)
+        else:
+            # fall back option if xyAxes in tpl is again not available (added by Livi)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
         ax.spines['left'].set_color('none')
         ax.set_xticks([0,2.5,5])
         ax.set_yticks([])
