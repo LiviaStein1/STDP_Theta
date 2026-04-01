@@ -68,6 +68,10 @@ defaultParams = {
           'precessFraction'     : 0.5,        #fraction of 2pi the prefered phase moves through
           'kappa'               : 1,          # von mises spread parameter
 
+          #Theta scrambling params (Livi addition)
+          'scramble_strength'    : 0.5,        # strength of theta phase scrambling 
+          'hf_strength'          : 0.5,        # strength of high frequency jitter added to scrambled theta phase
+
 }
 
 class MazeAgent():
@@ -132,6 +136,13 @@ class MazeAgent():
         self.snapshots = pd.DataFrame(columns = ['t','M','W','mazeState'])
         self.spikedata = {'CA3':{'times':[],'ids':[]}, 'CA1':{'times':[],'ids':[]}}
 
+        # new condition specific spike data (Livi addition)
+        self.spikedata_by_condition = {
+            'theta': {'CA1': {'times': [], 'ids': []}, 'CA3': {'times': [], 'ids': []}},
+            'notheta': {'CA1': {'times': [], 'ids': []}, 'CA3': {'times': [], 'ids': []}},
+            'scrambled': {'CA1': {'times': [], 'ids': []}, 'CA3': {'times': [], 'ids': []}}
+        }
+
         #set pos/vel
         print("   initialising velocity, position and direction")
         self.pos = np.array(self.initPos)
@@ -142,9 +153,16 @@ class MazeAgent():
         print("   setting time/run counters")
         self.t = 0
         self.runID = 0  
-        self.thetaPhase = self.thetaFreq*(self.t%(1/self.thetaFreq))*2*np.pi
-        # initialise scrambled theta phase (Livi addition)
-        self.thetaPhase_scrambled = np.random.uniform(0,2*np.pi, size = self.nCells) # give scrambled condition random theta phase (Livi addition)
+        
+        # initialise theta phase in radians -> to convert to degrees: radians * (180/np.pi) 
+        print("   initialising theta phases: clean and scrambled")
+        self.thetaPhase = self.thetaFreq*(self.t%(1/self.thetaFreq))*2*np.pi # has implicit modulo of 2pi, so always between 0 and 2pi
+        # Livi addition: initialise scrambled theta phase to zero at time zero, will then be updated according to scrambling parameters during movement policy update
+        self.thetaPhase_scrambled = np.zeros(1) # single value for current time
+        self.thetaPhase_scrambled[0]= 0.0 # initialise scrambled theta phase to zero at time zero (Livi addition)
+
+        # save history of scrambled theta phases for later plotting (Livi addition)
+        self.thetaPhase_scrambled_history = [] # list to store scrambled theta phase at each time step
 
         #make maze 
         print("   making the maze walls")
@@ -245,7 +263,9 @@ class MazeAgent():
             self.W = self.M.copy() / self.nCells
             self.M_theta = self.M.copy()
             self.W_notheta = self.W.copy()
-            self.W_scrambled = self.W.copy() #Livi scramble (i.e. remove if stupid)
+            self.W_scrambled = self.W.copy() #Livi addition scramble
+            # initialise scrambled theta phase (Livi addition)
+            # (old version of theta scrambled)  self.thetaPhase_scrambled = np.random.uniform(0,2*np.pi, size = self.nCells) # give scrambled condition random theta phase (Livi addition)
 
 
 
@@ -296,7 +316,7 @@ class MazeAgent():
         self.lastSpikeTime_notheta = np.array(-10.0)
         self.spikeCount = np.array(0)
         self.spikeCount_notheta = np.array(0)
-        # Livi: add scrambled condition
+        # Livi: added scrambled condition
         print("Adding 'theta scrambled' Condition")
         self.preTrace_scrambled = np.zeros(self.nCells) #for potentiation
         self.postTrace_scrambled = np.zeros(self.nCells) # for depression
@@ -365,7 +385,7 @@ class MazeAgent():
                             hist_delta[i] = delta
 
 
-
+                # update clean theta phase but not scrambled theta phase 
                 self.thetaPhase = self.thetaFreq*(self.t%(1/self.thetaFreq))*2*np.pi #8Hz theta 
 
                 #update history arrays
@@ -479,7 +499,7 @@ class MazeAgent():
                 self.preTrace,          
                 self.postTrace,          
                 self.lastSpikeTime, 
-                self.spikeCount),
+                self.spikeCount), 
                 
                 (self.thetaModulation_scrambled(state),
                  self.W_scrambled,
@@ -557,8 +577,16 @@ class MazeAgent():
                  self.lastSpikeTime_scrambled,
                  self.spikeCount_scrambled),
                 )
+        # fixed order of conditions in 'data'
+        condition_names = ('notheta', 'theta', 'scrambled')
 
-
+        # safety block for old objects loaded from disk that might not have the new 'spikedata_by_condition' attribute
+        if not hasattr(self, "spikedata_by_condition"):
+            self.spikedata_by_condition = {
+                'notheta':   {'CA1': {'times': [], 'ids': []}, 'CA3': {'times': [], 'ids': []}},
+                'theta':     {'CA1': {'times': [], 'ids': []}, 'CA3': {'times': [], 'ids': []}},
+                'scrambled': {'CA1': {'times': [], 'ids': []}, 'CA3': {'times': [], 'ids': []}},
+            }
         
         for i, (firingRate, W, preTrace, postTrace, lastSpikeTime, spikeCount) in enumerate(data): 
             preFiringRate_ = self.peakFiringRate * firingRate + self.baselineFiringRate #scale firing rate and add noise
@@ -583,8 +611,31 @@ class MazeAgent():
             spikeTimes = np.random.uniform(self.t,self.t+dt,len(neuronIDs))[spikingNeurons]
             spikeIDs = neuronIDs[spikingNeurons] # get ID of the neurons that spiked
             spikeLayerLabels = layerLabel_[spikingNeurons] # get the layer they belonged to
+
+            # numeric sorting by time
+            order = np.argsort(spikeTimes)
+            spikeTimes = spikeTimes[order]
+            spikeIDs = spikeIDs[order]
+            spikeLayerLabels = spikeLayerLabels[order]
+            # store in spikeList
             spikeList = np.vstack((spikeIDs,spikeTimes,spikeLayerLabels)).T # put them all in a matrix/list together
-            spikeList = spikeList[np.argsort(spikeList[:,1])] # sort them according to spike time   
+            # spikeList = spikeList[np.argsort(spikeList[:,1])] # sort them according to spike time   #ed by Livi to use ordering in '#numeric sorting by time' 
+
+            # create a new block to save the CA1 spikes of the specific theta condition (Livi addition)
+            cond = condition_names[i]
+            ca1_mask = (spikeLayerLabels == 'post')
+            ca3_mask = (spikeLayerLabels == 'pre')
+            self.spikedata_by_condition[cond]['CA3']['times'].extend(spikeTimes[ca3_mask].tolist())
+            self.spikedata_by_condition[cond]['CA3']['ids'].extend(spikeIDs[ca3_mask].tolist())
+            self.spikedata_by_condition[cond]['CA1']['times'].extend(spikeTimes[ca1_mask].tolist())
+            self.spikedata_by_condition[cond]['CA1']['ids'].extend(spikeIDs[ca1_mask].tolist())
+
+            # still save in spikedata as well for backward compatibility 
+            self.spikedata['CA3']['times'].extend(spikeTimes[ca3_mask].tolist())
+            self.spikedata['CA3']['ids'].extend(spikeIDs[ca3_mask].tolist())
+            self.spikedata['CA1']['times'].extend(spikeTimes[ca1_mask].tolist())
+            self.spikedata['CA1']['ids'].extend(spikeIDs[ca1_mask].tolist())
+
 
             for spikeInfo in spikeList:
                 cell, time, layer = int(spikeInfo[0]), float(spikeInfo[1]), spikeInfo[2] #for each column cell = cell ID as integer, time= spike time as float, layer= string I guess
@@ -601,7 +652,7 @@ class MazeAgent():
 
                 lastSpikeTime += timeDiff
 
-            if i == 1: # if theta condition (1=theta; 0=notheta, from line 538)
+            if i == 1: # if theta condition (1=theta; 0=notheta, 2 from line 538)
                 thetaFiringRate = firingRate_ #store theta firing rate to return later
             if i == 2: # if scrambled theta condition (2=scrambled, from line 538)
                 scrambledThetaFiringRate = firingRate_ # store scrambled theta firing rate in case it is needed at any point in the future (Livi addition)
@@ -620,15 +671,15 @@ class MazeAgent():
             sumWscrambled[sumWscrambled<1]=1
             self.W_scrambled = self.W_scrambled / sumWscrambled[:,np.newaxis]
         
-        #save spike data
-        CA3spiketimes = spikeTimes[spikeLayerLabels=='pre'] # spike time of all CA3 layer neurons
-        CA3spikeids = spikeIDs[spikeLayerLabels=='pre'] # spike IDs of CA3 cells
-        CA1spiketimes = spikeTimes[spikeLayerLabels=='post'] # spike times of CA1 layer cells
-        CA1spikeids = spikeIDs[spikeLayerLabels=='post'] # spike IDs of CA1 layer cells
-        self.spikedata['CA3']['times'].extend(CA3spiketimes)
-        self.spikedata['CA3']['ids'].extend(CA3spikeids)
-        self.spikedata['CA1']['times'].extend(CA1spiketimes)
-        self.spikedata['CA1']['ids'].extend(CA1spikeids)
+        #save spike data #ed bcs added saving separately per condition 
+        # CA3spiketimes = spikeTimes[spikeLayerLabels=='pre'] # spike time of all CA3 layer neurons
+        #CA3spikeids = spikeIDs[spikeLayerLabels=='pre'] # spike IDs of CA3 cells
+        #CA1spiketimes = spikeTimes[spikeLayerLabels=='post'] # spike times of CA1 layer cells
+        #CA1spikeids = spikeIDs[spikeLayerLabels=='post'] # spike IDs of CA1 layer cells
+        #self.spikedata['CA3']['times'].extend(CA3spiketimes)
+        #self.spikedata['CA3']['ids'].extend(CA3spikeids)
+        #self.spikedata['CA1']['times'].extend(CA1spiketimes)
+        #self.spikedata['CA1']['ids'].extend(CA1spikeids)
 
         return thetaFiringRate
 
@@ -658,7 +709,7 @@ class MazeAgent():
     # Add a new function that implements scrambled theta modulation (Livi addition)
     def thetaModulation_scrambled(self, firingRate, position=None, direction=None):
         """
-        Takes a firing rate vector and modulates it to account for scrambled theta phase precession, 
+        REWRITE(THIS IS NOT CORRECT): Takes a firing rate vector and modulates it to account for scrambled theta phase precession, 
         i.e. each cell has a random preferred theta phase that does not depend on position.
         Args:
             firingRate (np.array): The raw (position dependent) firing rate vector to be modulated
@@ -670,9 +721,18 @@ class MazeAgent():
         if direction is None:
             direction = self.dir
         
-        phase_inc = 2*np.pi * self.thetaFreq * self.dt
-        phase_noise = np.random.normal(0, np.pi/3, size=self.nCells) # add some noise to the scrambled phase to make it less extreme
-        self.thetaPhase_scrambled = (self.thetaPhase_scrambled + phase_inc + phase_noise) % (2*np.pi) # update scrambled theta phase with some noise
+        drift = self.thetaFreq * self.dt * 2*np.pi # calculate how much the theta phase should drift in this time step
+        scramble_noise = np.random.normal(0, self.scramble_strength) # adds some noise drawn from a normal distribution with mean 0 and sd defined by scramble_strength parameter to the scrambled theta phase at each time step, making it more random and less predictable
+        hf_jitter = np.random.normal(0, self.hf_strength) # adds some high frequency jitter noise 
+        self.thetaPhase_scrambled = (self.thetaPhase_scrambled + drift + scramble_noise + hf_jitter) % (2*np.pi) # update scrambled theta phase by adding drift, scramble noise and high frequency jitter, and wrap around to keep it between 0 and 2*pi for vonmises calculation
+
+        # save the scrambled theta phase for this time step (Livi addition)
+        self.thetaPhase_scrambled_history.append(self.thetaPhase_scrambled)
+
+        ## OLD SCRAMBLE VERSION
+        # phase_inc = 2*np.pi * self.thetaFreq * self.dt
+        # phase_noise = np.random.normal(0, np.pi/3, size=self.nCells) # add some noise to the scrambled phase to make it less extreme
+        # self.thetaPhase_scrambled = (self.thetaPhase_scrambled + phase_inc + phase_noise) % (2*np.pi) # update scrambled theta phase with some noise
 
         ## same as for normal theta modulation, just with scrambled theta phase instead of position-dependent preferred phase
         vectorToCells = self.vectorsToCellCentres(position)
@@ -1894,10 +1954,12 @@ class Visualiser():
         return fig, ax 
 
 
-    def plotFieldSilhouette(self, N=25, plot_pf=True, plot_pf_notheta=False, plot_pf_M=True, plot_rf=False, plot_pf_scrambled=False, no_theta=False): # Livi note: not adjusted for scrambled theta
+    def plotFieldSilhouette(self, N=25, plot_pf=True, plot_pf_notheta=False, plot_pf_M=True, plot_rf=False, plot_pf_scrambled=False, no_theta=False, ax=None):  
+        # take the snapshot at 30 minutes (or closest to it)  
         hist_id = self.snapshots['t'].sub(30*60).abs().to_numpy().argmin()
         snapshot = self.snapshots.iloc[hist_id-22]
 
+        # get the x coordinates of the maze, the receptive field and place fields for the Nth cell, and normalize them by their integral (trapezoidal rule) to get comparable curves
         x = self.mazeAgent.discreteCoords[10,:,0]
         rf = self.mazeAgent.discreteStates[10,:,N]
         pf = self.mazeAgent.getPlaceFields(M=self.mazeAgent.W, threshold=0)[N][10,:]
@@ -1906,18 +1968,23 @@ class Visualiser():
         pf_M = self.mazeAgent.getPlaceFields(M=self.mazeAgent.M, threshold=0)[N][10,:]
         rf, pf, pf_notheta, pf_scrambled, pf_M = rf/np.trapezoid(rf,x), pf/np.trapezoid(pf,x), pf_notheta/np.trapezoid(pf_notheta,x), pf_scrambled/np.trapezoid(pf_scrambled,x), pf_M/np.trapezoid(pf_M,x) #added scrambled here by Livi
 
-        fig, ax = plt.subplots(figsize=(2,0.5))
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(2,0.5))
+        else:
+            ax.clear()
+            fig = ax.figure
+
         ax.set_xlim(0,5)
         if plot_rf == True:
-            ax.fill_between(x[rf>=0],rf[rf>=0],0,facecolor="C2",alpha=0.5)
+            ax.fill_between(x[rf>=0],rf[rf>=0],0,facecolor="#02a3a6",alpha=0.5)
         if plot_pf_M == True:
-            ax.fill_between(x[pf_M>=0],pf_M[pf_M>=0],0,facecolor="C0",alpha=0.5)        
+            ax.fill_between(x[pf_M>=0],pf_M[pf_M>=0],0,facecolor="#8c52ff",alpha=0.5)        
         if plot_pf == True:
-            ax.fill_between(x[pf>=0],pf[pf>=0],0,facecolor="C1",alpha=0.5)
+            ax.fill_between(x[pf>=0],pf[pf>=0],0,facecolor="#ff66c4",alpha=0.5)
         if plot_pf_notheta == True:
-            ax.fill_between(x[pf_notheta>=0],pf_notheta[pf_notheta>=0],0,facecolor="C3",alpha=0.5)
+            ax.fill_between(x[pf_notheta>=0],pf_notheta[pf_notheta>=0],0,facecolor="#cb6ce6",alpha=0.5)
         if plot_pf_scrambled == True:
-            ax.fill_between(x[pf_scrambled>=0],pf_scrambled[pf_scrambled>=0],0,facecolor="C5",alpha=0.5) #added by Livi
+            ax.fill_between(x[pf_scrambled>=0],pf_scrambled[pf_scrambled>=0],0,facecolor="#e2a9f1",alpha=0.5) #added by Livi
 
         pf = self.mazeAgent.getPlaceFields(M=self.mazeAgent.W, threshold=0)[N]
         pf_notheta = self.mazeAgent.getPlaceFields(M=snapshot['W_notheta'], threshold=0)[N]
@@ -1936,7 +2003,8 @@ class Visualiser():
         ax.set_xticks([0,2.5,5])
         ax.set_yticks([])
         ax.set_xticklabels(["","",""])
-        plt.tight_layout()
+        if ax is None:
+            plt.tight_layout()
 
         return fig, ax
 
