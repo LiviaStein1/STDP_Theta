@@ -1,0 +1,6 @@
+theta_condition,seed,total_episodes,reached_goal,wrong_arm,timeouts,percentage_correct,average_time_to_goal
+ScrTheta_0.4,0,10,1,0,9,0.1,83.05999999992446
+ScrTheta_0.4,2,10,0,0,10,0.0,
+ScrTheta_0.4,4,10,1,0,9,0.1,84.46999999992323
+ScrTheta_0.4,6,10,1,0,9,0.1,64.82999999994104
+ScrTheta_0.4,42,10,0,0,10,0.0,
