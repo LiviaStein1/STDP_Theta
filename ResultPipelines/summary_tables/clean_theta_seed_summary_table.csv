@@ -1,0 +1,6 @@
+theta_condition,seed,total_episodes,reached_goal,wrong_arm,timeouts,percentage_correct,average_time_to_goal
+clean_theta,0,10,7,1,2,0.7,49.43428571426146
+clean_theta,2,10,7,2,1,0.7,46.96571428569229
+clean_theta,4,10,7,2,1,0.7,53.96428571425735
+clean_theta,6,10,9,1,0,0.9,48.91999999996014
+clean_theta,42,10,8,2,0,0.8,45.797499999976466
