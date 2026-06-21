@@ -1,0 +1,41 @@
+# Figure size, resolution
+figure.figsize : 1.5, 1  # max width is 3.5 for single column
+figure.dpi: 300
+figure.facecolor: none # Remove background
+
+# Fonts
+font.family: sans
+font.sans-serif: Helvetica
+font.style: normal
+
+# Axes
+axes.titlesize : 7
+axes.labelsize: 7
+xtick.labelsize: 7
+axes.labelweight: bold
+ytick.labelsize: 7
+legend.fontsize: 7
+font.size: 7
+axes.spines.top: False
+axes.spines.right: False
+axes.facecolor: none
+
+# Lines and markers
+lines.linewidth : .5
+lines.markersize : 1
+
+# Colors
+#blue2red = ['#00004d', '#3b0555', '#630e5c', '#891a63', '#b0276a', '#d73571', '#ff4377']
+#rainbow = ['dodgerblue', 'slateblue', 'deeppink', 'crimson', 'orangered', 'orange', 'gold', 'greenyellow', 'springgreen', 'mediumturquoise']
+#vintage_spectrum = ['577590', '43aa8b', '90be6d', 'f9c74f', 'f8961e', 'f3722c', 'f94144']
+axes.prop_cycle: cycler(color=['577590', '43aa8b', '90be6d', 'f9c74f', 'f8961e', 'f3722c', 'f94144'])
+#lines.color: midnightblue
+image.cmap: viridis
+
+# Legend
+legend.loc: best
+legend.frameon: False
+
+savefig.bbox : tight
+savefig.pad_inches : 0.01  # Use virtually all space when we specify figure dimensions
+
